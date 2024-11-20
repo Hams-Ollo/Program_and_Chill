@@ -1,133 +1,153 @@
-# Program & Chill AI Assistant
+# Program & Chill AI Assistant 🤖
 
-## Overview
-
-Program & Chill is an intelligent conversational AI assistant built with Groq's Mixtral-8x7B model and Streamlit. It features a modern dark-themed UI and provides fast, accurate responses in a user-friendly chat interface.
+A powerful multi-agent AI assistant with advanced document processing and Retrieval-Augmented Generation (RAG) capabilities. Built with Groq's Mixtral model, LangChain, and Streamlit.
 
 ## 🌟 Features
 
-- **Advanced Language Model**: Powered by Groq's Mixtral-8x7B model
-- **Modern Dark Theme UI**: Clean, responsive interface with customized styling
-- **Intelligent Conversations**: Natural and context-aware responses
-- **Configurable Settings**: Adjustable temperature and response length
-- **Error Handling**: Robust error management and logging
-- **State Management**: Efficient conversation history tracking
+- **Intelligent Conversations**: Powered by Groq's Mixtral-8x7b-32768 model
+- **Document Processing**: Support for multiple document formats (PDF, DOCX, TXT)
+- **Knowledge Base**: Dynamic RAG system using ChromaDB vector store
+- **User-Friendly Interface**: Clean, intuitive Streamlit UI
+- **Multi-Agent Architecture**: Modular design for extensibility
 
-## 🛠️ Technology Stack
+## 🚀 Getting Started
 
-- **Frontend**: Streamlit
-- **AI Model**: Groq API (Mixtral-8x7B)
-- **Language**: Python 3.8+
-- **Key Libraries**:
-  - `streamlit`: Web interface
-  - `langchain-groq`: Groq API integration
-  - `python-dotenv`: Environment management
-  - `logging`: Error tracking and debugging
+### Prerequisites
 
-## 📋 Prerequisites
+- Python 3.8 or higher
+- [Groq API Key](https://console.groq.com)
+- Virtual environment (recommended)
 
-- Python 3.8+
-- Groq API key
-- Git (for version control)
+### Installation
 
-## 🚀 Quick Start
+Step 1. Clone the repository:
 
-1. **Clone the repository**:
-
-   ```bash
-   git clone https://github.com/Hams-Ollo/Program_and_Chill.git
-   cd Program_and_Chill
-   ```
-
-2. **Set up virtual environment**:
-
-   ```bash
-   python -m venv venv
-   # For Windows:
-   .\venv\Scripts\activate
-   # For Unix/MacOS:
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies**:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment variables**:
-   - Create a `.env` file in the project root
-   - Add your Groq API key:
-
-     ```curl
-     GROQ_API_KEY=your_api_key_here
-     ```
-
-5. **Run the application**:
-
-   ```bash
-   streamlit run main.py
-   ```
-
-## 📁 Project Structure
-
-```curl
-Program_and_Chill/
-├── main.py              # Main application file
-├── .env                 # Environment variables
-├── requirements.txt     # Project dependencies
-└── README.md           # Project documentation
+```bash
+git clone https://github.com/yourusername/program_and_chill.git
+cd program_and_chill
 ```
 
-## ⚙️ Core Components
+Step 2. Create and activate a virtual environment (optional but recommended):
 
-### Main Application (`main.py`)
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
 
-- Streamlit UI configuration
-- Chat interface implementation
-- Groq API integration
-- State management
-- Error handling
-- Logging setup
+Step 3. Install dependencies:
 
-### Environment Configuration (`.env`)
+```bash
+pip install -r requirements.txt
+```
 
-- API key storage
-- Configuration settings
+Step 4. Create a `.env` file in the root directory:
 
-## 🎨 UI Features
+```env
+GROQ_API_KEY=your_groq_api_key_here
+MODEL_NAME=mixtral-8x7b-32768
+DEBUG=False
+LOG_LEVEL=INFO
+```
 
-- **Dark Theme**: Modern, eye-friendly dark mode
-- **Responsive Design**: Adapts to different screen sizes
-- **Chat Interface**: Clean message bubbles with distinct styling
-- **Settings Sidebar**: Easy access to model parameters
-- **Error Feedback**: Clear error messages and status indicators
+### Running the Application
 
-## 🔧 Configuration Options
+Start the application with:
 
-### Model Parameters
+```bash
+streamlit run main.py
+```
 
-- **Temperature**: Controls response creativity (0.0 - 1.0)
-- **Max Tokens**: Adjusts response length (100 - 4000)
+The app will be available at `http://localhost:8501`
 
-### Chat Settings
+## 💡 Usage
 
-- Clear chat history
-- View conversation timestamps
-- Error state tracking
+### Chat Interface
+
+1. Navigate to the "Chat" tab
+2. Type your message in the input field
+3. Get AI-powered responses with context from your documents
+
+### Document Management
+
+1. Go to the "Document Upload" tab
+2. Upload supported documents (PDF, DOCX, TXT)
+3. Documents will be processed and added to the knowledge base
+4. Chat with the AI about your documents' content
+
+## 🛠 Technical Architecture
+
+### Components
+
+- **Chat Agent**: Custom implementation using Groq's API
+- **Document Processor**: Handles document parsing and vectorization
+- **Vector Store**: ChromaDB for efficient similarity search
+- **UI Layer**: Streamlit for the web interface
+
+### Key Technologies
+
+- **LLM**: Groq's Mixtral-8x7b-32768
+- **Framework**: LangChain
+- **Embeddings**: Sentence Transformers
+- **Vector DB**: ChromaDB
+- **UI**: Streamlit
+- **Document Processing**: Unstructured, python-docx, pdfminer.six
+
+## 📦 Project Structure
+
+```curl
+program_and_chill/
+├── app/
+│   ├── agents/
+│   │   ├── chat_agent.py
+│   │   └── document_processor.py
+│   └── utils/
+├── static/
+├── .env
+├── main.py
+├── requirements.txt
+└── README.md
+```
+
+## 🔄 Version History
+
+- **v0.3.0**: Migration to Groq API, improved error handling
+- **v0.2.1**: Enhanced document processing, bug fixes
+- **v0.2.0**: Added RAG capabilities
+- **v0.1.0**: Initial release
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
 ## 📝 License
 
-[MIT License](LICENSE)
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 👤 Author
+## 🙏 Acknowledgments
 
-@hams_ollo
+- [Groq](https://groq.com) for the LLM API
+- [LangChain](https://python.langchain.com) for the framework
+- [Streamlit](https://streamlit.io) for the UI components
+- [ChromaDB](https://www.trychroma.com) for vector storage
 
-## 🔄 Version
+## ⚠️ Known Limitations
 
-Current Version: 0.0.1
+- Async operations not yet supported
+- File size limits apply to document processing
+- Single model configuration
+
+## 🔮 Future Enhancements
+
+- Implement async processing
+- Add support for more document types
+- Enhance error recovery mechanisms
+- Add model selection options
+- Improve document preprocessing
+
+## 📫 Support
+
+For support, please open an issue in the GitHub repository or contact the maintainers.
