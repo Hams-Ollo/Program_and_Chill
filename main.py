@@ -70,13 +70,20 @@ Version: 0.0.1
 
 import streamlit as st
 import os
-import tempfile
-from datetime import datetime
-from typing import Dict, List, Any, Optional
-from dotenv import load_dotenv
 import logging
+from dotenv import load_dotenv
 from app.agents.chat_agent import ChatAgent
 from app.agents.document_processor import DocumentProcessor
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+
+# Must be the first Streamlit command
+st.set_page_config(
+    page_title="Program & Chill AI Assistant",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Load environment variables
 load_dotenv()
@@ -88,20 +95,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def initialize_chat_agent():
+    """Initialize the chat agent with API key."""
+    try:
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            st.error("Please set the GROQ_API_KEY in your .env file")
+            return None
+        return ChatAgent(api_key=groq_api_key)
+    except Exception as e:
+        st.error(f"Error initializing chat agent: {str(e)}")
+        return None
+
 # Initialize session state
 if "chat_agent" not in st.session_state:
-    st.session_state.chat_agent = ChatAgent(api_key=os.getenv("OPENAI_API_KEY"))
+    st.session_state.chat_agent = initialize_chat_agent()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "doc_processor" not in st.session_state:
     st.session_state.doc_processor = DocumentProcessor()
 
 # Streamlit UI
-st.set_page_config(
-    page_title="Program & Chill AI Assistant",
-    page_icon="🤖",
-    layout="wide"
-)
 
 # Sidebar for navigation
 st.sidebar.title("Navigation")
