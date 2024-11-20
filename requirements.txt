@@ -1,0 +1,13 @@
+streamlit>=1.24.0
+langchain>=0.0.350
+langchain-groq>=0.0.1
+langgraph>=0.0.1
+SpeechRecognition>=3.10.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+pandas>=2.0.0
+numpy>=1.24.0
+chromadb>=0.4.22
+APScheduler>=3.10.4

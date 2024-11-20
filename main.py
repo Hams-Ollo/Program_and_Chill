@@ -58,204 +58,278 @@
 # 5. Clean untracked files:       git clean -fd
 #
 #-------------------------------------------------------------------------------------#
-#----------# IMPORTS  #----------#
-import os
-import sys
-import logging
-import datetime
+
+
+"""
+Program & Chill AI Assistant
+---------------------------
+A multi-agent AI system for content creation and brand management using LangGraph,
+Streamlit, and Groq API.
+
+Author: @hams_ollo
+Version: 0.0.1
+"""
+
 import streamlit as st
-import requests
-import json
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Tuple, Any
-from dataclasses import dataclass
-from langgraph.graph import Graph, StateGraph
-from langchain_core.messages import HumanMessage, AIMessage
 from langchain_groq import ChatGroq
-from langchain.agents import Tool
-from langchain.tools import BaseTool
-from langchain_core.prompts import ChatPromptTemplate
-import streamlit as st
-from PIL import Image
-import speech_recognition as sr
-import cv2
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.schema import SystemMessage, HumanMessage
+from langgraph.graph import END, StateGraph
+from typing import Dict, List, Tuple, Any, Optional
+import os
 from dotenv import load_dotenv
+from database_manager import DatabaseManager
+import logging
+import json
+from datetime import datetime
+import uuid
 
-
-#-------------------------------------------------------------------------------------#
-#----------# CONFIG  #----------#
+# Load environment variables
 load_dotenv()
 
-# LangSmith Configuration
-os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGCHAIN_TRACING_V2", "false")
-os.environ["LANGCHAIN_ENDPOINT"] = os.getenv("LANGCHAIN_ENDPOINT", "")
-os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY", "")
-os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# API Keys
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY not found in environment variables")
+# Initialize database
+db = DatabaseManager(persist_directory="./chroma_db")
 
+# Initialize LLM
+llm = ChatGroq(
+    temperature=0.7,
+    groq_api_key=os.getenv("GROQ_API_KEY"),
+    model_name="mixtral-8x7b-32768"
+)
 
-#-------------------------------------------------------------------------------------#
-#----------# FUNCTIONS  #----------#
-
-@dataclass
 class AgentState:
-    messages: List[str]
-    task_queue: List[Dict]
-    current_context: Dict
-    artifacts: Dict
-    
-class ContentAssistant:
-    def __init__(self, groq_api_key: str):
-        self.llm = ChatGroq(
-            api_key=groq_api_key,
-            model_name="mixtral-8x7b-32768"
-        )
-        
-        self.tools = self._create_tools()
-        self.workflow = self._create_workflow()
-        
-    def _create_tools(self) -> List[BaseTool]:
-        tools = [
-            Tool(
-                name="content_planner",
-                func=self._plan_content,
-                description="Plans content strategy and schedules"
-            ),
-            Tool(
-                name="social_media_manager",
-                func=self._manage_social,
-                description="Manages social media posts and engagement"
-            ),
-            Tool(
-                name="brand_analyzer",
-                func=self._analyze_brand,
-                description="Analyzes brand performance and metrics"
-            )
+    def __init__(self):
+        self.messages: List[Dict] = []
+        self.current_plan: Optional[Dict] = None
+        self.current_post: Optional[Dict] = None
+        self.error: Optional[str] = None
+
+def understand_request(state: AgentState) -> Tuple[AgentState, str]:
+    """Process the user's request and determine the next action."""
+    try:
+        messages = [
+            SystemMessage(content="You are a helpful AI assistant for content creation and social media management."),
+            *[HumanMessage(content=msg["content"]) for msg in state.messages]
         ]
-        return tools
-    
-    def _create_workflow(self) -> StateGraph:
-        workflow = StateGraph(AgentState)
+        response = llm.invoke(messages)
         
-        # Define state transitions
-        workflow.add_node("understand_request", self._understand_request)
-        workflow.add_node("execute_task", self._execute_task)
-        workflow.add_node("generate_response", self._generate_response)
+        # Update state with the response
+        state.messages.append({"role": "assistant", "content": response.content})
         
-        # Define edges
-        workflow.add_edge("understand_request", "execute_task")
-        workflow.add_edge("execute_task", "generate_response")
-        
-        return workflow
-    
-    def _understand_request(self, state: AgentState) -> AgentState:
-        """Analyzes user input and determines required actions"""
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "Analyze the user request and determine required actions."),
-            ("user", "{input}")
+        # Determine next action
+        if "create plan" in response.content.lower():
+            return state, "plan_execution"
+        elif "create post" in response.content.lower():
+            return state, "execute_task"
+        else:
+            return state, "generate_response"
+    except Exception as e:
+        state.error = str(e)
+        logger.error(f"Error in understand_request: {e}")
+        return state, END
+
+def plan_execution(state: AgentState) -> Tuple[AgentState, str]:
+    """Create and store a content plan."""
+    try:
+        # Generate content plan
+        plan_prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="Create a detailed content plan based on the user's request."),
+            MessagesPlaceholder(variable_name="history"),
+            HumanMessage(content="Generate a content plan with specific goals and timeline.")
         ])
         
-        chain = prompt | self.llm
+        chain = plan_prompt | llm
         
-        response = chain.invoke({"input": state.messages[-1]})
-        state.task_queue.append({"task": response.content})
-        return state
-    
-    def _execute_task(self, state: AgentState) -> AgentState:
-        """Executes the determined tasks"""
-        current_task = state.task_queue[-1]
+        # Create plan
+        plan_response = chain.invoke({"history": state.messages})
+        plan_data = {
+            "id": str(uuid.uuid4()),
+            "content": plan_response.content,
+            "created_at": datetime.now().isoformat(),
+            "status": "active"
+        }
         
-        # Match task to appropriate tool
-        for tool in self.tools:
-            if tool.name in current_task["task"].lower():
-                result = tool.func(state)
-                state.artifacts[tool.name] = result
-                break
-                
-        return state
-    
-    def _generate_response(self, state: AgentState) -> AgentState:
-        """Generates final response based on task execution results"""
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "Generate a response based on the task results."),
-            ("user", "{results}")
+        # Store in database
+        db.add_content_plan(plan_data["id"], plan_data)
+        
+        # Update state
+        state.current_plan = plan_data
+        state.messages.append({"role": "assistant", "content": f"Content plan created: {plan_data['id']}"})
+        
+        return state, "generate_response"
+    except Exception as e:
+        state.error = str(e)
+        logger.error(f"Error in plan_execution: {e}")
+        return state, END
+
+def execute_task(state: AgentState) -> Tuple[AgentState, str]:
+    """Execute specific tasks like creating social media posts."""
+    try:
+        # Generate social media post
+        post_prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="Create an engaging social media post based on the content plan and user request."),
+            MessagesPlaceholder(variable_name="history"),
+            HumanMessage(content="Generate a social media post.")
         ])
         
-        chain = prompt | self.llm
+        chain = post_prompt | llm
         
-        response = chain.invoke({"results": str(state.artifacts)})
-        state.messages.append(response.content)
-        return state
-    
-    # Tool implementation methods
-    def _plan_content(self, state: AgentState) -> Dict:
-        """Implements content planning logic"""
-        pass
+        # Create post
+        post_response = chain.invoke({"history": state.messages})
+        post_data = {
+            "id": str(uuid.uuid4()),
+            "content": post_response.content,
+            "created_at": datetime.now().isoformat(),
+            "plan_id": state.current_plan["id"] if state.current_plan else None,
+            "status": "draft"
+        }
         
-    def _manage_social(self, state: AgentState) -> Dict:
-        """Implements social media management logic"""
-        pass
+        # Store in database
+        db.add_social_post(post_data["id"], post_data)
         
-    def _analyze_brand(self, state: AgentState) -> Dict:
-        """Implements brand analysis logic"""
-        pass
+        # Update state
+        state.current_post = post_data
+        state.messages.append({"role": "assistant", "content": f"Social post created: {post_data['id']}"})
+        
+        return state, "generate_response"
+    except Exception as e:
+        state.error = str(e)
+        logger.error(f"Error in execute_task: {e}")
+        return state, END
+
+def generate_response(state: AgentState) -> Tuple[AgentState, str]:
+    """Generate a final response to the user."""
+    try:
+        response_prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="Generate a helpful response summarizing the actions taken."),
+            MessagesPlaceholder(variable_name="history"),
+            HumanMessage(content="Summarize what has been done and provide next steps.")
+        ])
+        
+        chain = response_prompt | llm
+        
+        # Generate response
+        final_response = chain.invoke({"history": state.messages})
+        state.messages.append({"role": "assistant", "content": final_response.content})
+        
+        return state, END
+    except Exception as e:
+        state.error = str(e)
+        logger.error(f"Error in generate_response: {e}")
+        return state, END
+
+# Create workflow
+workflow = StateGraph(AgentState)
+
+# Add nodes
+workflow.add_node("understand_request", understand_request)
+workflow.add_node("plan_execution", plan_execution)
+workflow.add_node("execute_task", execute_task)
+workflow.add_node("generate_response", generate_response)
+
+# Add edges
+workflow.add_edge("understand_request", "plan_execution")
+workflow.add_edge("understand_request", "execute_task")
+workflow.add_edge("understand_request", "generate_response")
+workflow.add_edge("plan_execution", "generate_response")
+workflow.add_edge("execute_task", "generate_response")
+
+# Set entry point
+workflow.set_entry_point("understand_request")
+
+# Compile workflow
+app = workflow.compile()
 
 # Streamlit UI
-def create_ui():
-    st.title("AI Brand Assistant")
+st.set_page_config(page_title="Program & Chill", page_icon="🎯", layout="wide")
+
+# Apply dark theme
+st.markdown("""
+    <style>
+        .stApp {
+            background-color: #1E1E1E;
+            color: #FFFFFF;
+        }
+        .stTextInput > div > div > input {
+            background-color: #2D2D2D;
+            color: #FFFFFF;
+        }
+        .stButton > button {
+            background-color: #0078D4;
+            color: #FFFFFF;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# Sidebar
+with st.sidebar:
+    st.title("Program & Chill")
+    st.markdown("---")
     
-    # Input methods
-    input_type = st.selectbox("Select Input Type", 
-                             ["Text", "Image", "Voice", "Video"])
+    # View selection
+    view = st.radio("Select View", ["Chat", "Content Calendar", "Analytics"])
     
-    if input_type == "Text":
-        user_input = st.text_area("Enter your request:")
-    elif input_type == "Image":
-        uploaded_file = st.file_uploader("Upload Image", type=['png', 'jpg'])
-        if uploaded_file:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded Image")
-    elif input_type == "Voice":
-        if st.button("Record Voice"):
-            # Initialize speech recognition
-            r = sr.Recognizer()
-            with sr.Microphone() as source:
-                st.write("Recording...")
-                audio = r.listen(source)
-                try:
-                    user_input = r.recognize_google(audio)
-                    st.write(f"Transcribed: {user_input}")
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-    elif input_type == "Video":
-        uploaded_file = st.file_uploader("Upload Video", type=['mp4', 'mov'])
-        if uploaded_file:
-            # Process video file
-            pass
+    # Settings and tools
+    st.markdown("### Settings")
+    temperature = st.slider("AI Temperature", 0.0, 1.0, 0.7)
+    
+    # Update LLM temperature
+    llm.temperature = temperature
 
-    if st.button("Process"):
-        # Initialize and run assistant
-        assistant = ContentAssistant(groq_api_key=GROQ_API_KEY)
-        initial_state = AgentState(
-            messages=[user_input],
-            task_queue=[],
-            current_context={},
-            artifacts={}
-        )
+# Main content area
+if view == "Chat":
+    st.header("AI Assistant")
+    
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    
+    # Display chat history
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # Chat input
+    if prompt := st.chat_input("Type your message here..."):
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
         
-        # Execute workflow
-        final_state = assistant.workflow.run(initial_state)
+        # Process with workflow
+        state = AgentState()
+        state.messages = st.session_state.messages.copy()
+        result = app.invoke(state)
         
-        # Display response
-        st.write("Response:", final_state.messages[-1])
+        # Update chat history with assistant's response
+        if result.messages:
+            for message in result.messages[len(st.session_state.messages):]:
+                st.session_state.messages.append(message)
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
 
+elif view == "Content Calendar":
+    st.header("Content Calendar")
+    
+    # Query recent content plans
+    recent_plans = db.query_content_plans("", n_results=10)
+    
+    # Display content plans
+    for plan in recent_plans:
+        with st.expander(f"Plan: {plan['created_at']}"):
+            st.write(plan['content'])
+            st.button("Edit", key=f"edit_{plan['id']}")
+            st.button("Delete", key=f"delete_{plan['id']}")
 
-#-------------------------------------------------------------------------------------#
-#----------# MAIN  #----------#
-if __name__ == "__main__":
-    create_ui()
+elif view == "Analytics":
+    st.header("Analytics Dashboard")
+    
+    # Placeholder for analytics
+    st.markdown("Analytics dashboard coming soon!")
