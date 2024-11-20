@@ -68,6 +68,7 @@ Author: @hams_ollo
 Version: 0.0.1
 """
 
+from typing import Dict, List, Optional, Any, Tuple
 import streamlit as st
 import os
 from dotenv import load_dotenv
@@ -91,8 +92,7 @@ llm = ChatGroq(
     groq_api_key=os.getenv("GROQ_API_KEY"),
     model_name="mixtral-8x7b-32768",
     temperature=0.7,
-    max_tokens=2000,
-    top_p=0.9
+    max_tokens=2000
 )
 
 # System prompt for better conversation
