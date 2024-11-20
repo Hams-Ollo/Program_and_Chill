@@ -68,21 +68,194 @@ import requests
 import json
 import pandas as pd
 import numpy as np
-
+from typing import Dict, List, Tuple, Any
+from dataclasses import dataclass
+from langgraph.graph import Graph, StateGraph
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_groq import ChatGroq
+from langchain.agents import Tool
+from langchain.tools import BaseTool
+from langchain_core.prompts import ChatPromptTemplate
+import streamlit as st
+from PIL import Image
+import speech_recognition as sr
+import cv2
 from dotenv import load_dotenv
+
 
 #-------------------------------------------------------------------------------------#
 #----------# CONFIG  #----------#
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
+
+# LangSmith Configuration
+os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGCHAIN_TRACING_V2", "false")
+os.environ["LANGCHAIN_ENDPOINT"] = os.getenv("LANGCHAIN_ENDPOINT", "")
+os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY", "")
+os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "")
+
+# API Keys
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY not found in environment variables")
+
 
 #-------------------------------------------------------------------------------------#
 #----------# FUNCTIONS  #----------#
 
+@dataclass
+class AgentState:
+    messages: List[str]
+    task_queue: List[Dict]
+    current_context: Dict
+    artifacts: Dict
+    
+class ContentAssistant:
+    def __init__(self, groq_api_key: str):
+        self.llm = ChatGroq(
+            api_key=groq_api_key,
+            model_name="mixtral-8x7b-32768"
+        )
+        
+        self.tools = self._create_tools()
+        self.workflow = self._create_workflow()
+        
+    def _create_tools(self) -> List[BaseTool]:
+        tools = [
+            Tool(
+                name="content_planner",
+                func=self._plan_content,
+                description="Plans content strategy and schedules"
+            ),
+            Tool(
+                name="social_media_manager",
+                func=self._manage_social,
+                description="Manages social media posts and engagement"
+            ),
+            Tool(
+                name="brand_analyzer",
+                func=self._analyze_brand,
+                description="Analyzes brand performance and metrics"
+            )
+        ]
+        return tools
+    
+    def _create_workflow(self) -> StateGraph:
+        workflow = StateGraph(AgentState)
+        
+        # Define state transitions
+        workflow.add_node("understand_request", self._understand_request)
+        workflow.add_node("execute_task", self._execute_task)
+        workflow.add_node("generate_response", self._generate_response)
+        
+        # Define edges
+        workflow.add_edge("understand_request", "execute_task")
+        workflow.add_edge("execute_task", "generate_response")
+        
+        return workflow
+    
+    def _understand_request(self, state: AgentState) -> AgentState:
+        """Analyzes user input and determines required actions"""
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Analyze the user request and determine required actions."),
+            ("user", "{input}")
+        ])
+        
+        chain = prompt | self.llm
+        
+        response = chain.invoke({"input": state.messages[-1]})
+        state.task_queue.append({"task": response.content})
+        return state
+    
+    def _execute_task(self, state: AgentState) -> AgentState:
+        """Executes the determined tasks"""
+        current_task = state.task_queue[-1]
+        
+        # Match task to appropriate tool
+        for tool in self.tools:
+            if tool.name in current_task["task"].lower():
+                result = tool.func(state)
+                state.artifacts[tool.name] = result
+                break
+                
+        return state
+    
+    def _generate_response(self, state: AgentState) -> AgentState:
+        """Generates final response based on task execution results"""
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Generate a response based on the task results."),
+            ("user", "{results}")
+        ])
+        
+        chain = prompt | self.llm
+        
+        response = chain.invoke({"results": str(state.artifacts)})
+        state.messages.append(response.content)
+        return state
+    
+    # Tool implementation methods
+    def _plan_content(self, state: AgentState) -> Dict:
+        """Implements content planning logic"""
+        pass
+        
+    def _manage_social(self, state: AgentState) -> Dict:
+        """Implements social media management logic"""
+        pass
+        
+    def _analyze_brand(self, state: AgentState) -> Dict:
+        """Implements brand analysis logic"""
+        pass
+
+# Streamlit UI
+def create_ui():
+    st.title("AI Brand Assistant")
+    
+    # Input methods
+    input_type = st.selectbox("Select Input Type", 
+                             ["Text", "Image", "Voice", "Video"])
+    
+    if input_type == "Text":
+        user_input = st.text_area("Enter your request:")
+    elif input_type == "Image":
+        uploaded_file = st.file_uploader("Upload Image", type=['png', 'jpg'])
+        if uploaded_file:
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Uploaded Image")
+    elif input_type == "Voice":
+        if st.button("Record Voice"):
+            # Initialize speech recognition
+            r = sr.Recognizer()
+            with sr.Microphone() as source:
+                st.write("Recording...")
+                audio = r.listen(source)
+                try:
+                    user_input = r.recognize_google(audio)
+                    st.write(f"Transcribed: {user_input}")
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+    elif input_type == "Video":
+        uploaded_file = st.file_uploader("Upload Video", type=['mp4', 'mov'])
+        if uploaded_file:
+            # Process video file
+            pass
+
+    if st.button("Process"):
+        # Initialize and run assistant
+        assistant = ContentAssistant(groq_api_key=GROQ_API_KEY)
+        initial_state = AgentState(
+            messages=[user_input],
+            task_queue=[],
+            current_context={},
+            artifacts={}
+        )
+        
+        # Execute workflow
+        final_state = assistant.workflow.run(initial_state)
+        
+        # Display response
+        st.write("Response:", final_state.messages[-1])
+
+
 #-------------------------------------------------------------------------------------#
 #----------# MAIN  #----------#
-
-
-#-------------------------------------------------------------------------------------#
-
-
+if __name__ == "__main__":
+    create_ui()
