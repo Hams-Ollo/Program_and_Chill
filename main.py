@@ -97,6 +97,7 @@ logger = logging.getLogger(__name__)
 
 def initialize_chat_agent():
     """Initialize the chat agent with API key."""
+    print("🔑 Initializing chat agent with API key...")
     try:
         groq_api_key = os.getenv("GROQ_API_KEY")
         if not groq_api_key:
@@ -109,8 +110,10 @@ def initialize_chat_agent():
 
 # Initialize session state
 if "chat_agent" not in st.session_state:
+    print("🤖 Creating new chat agent instance...")
     st.session_state.chat_agent = initialize_chat_agent()
 if "messages" not in st.session_state:
+    print("💬 Initializing message history...")
     st.session_state.messages = []
 if "doc_processor" not in st.session_state:
     st.session_state.doc_processor = DocumentProcessor()
@@ -135,6 +138,7 @@ if page == "Chat":
     
     # Chat input
     if prompt := st.chat_input("What would you like to know?"):
+        print(f"📝 Processing user input at {datetime.now().strftime('%H:%M:%S')}...")
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -170,6 +174,7 @@ elif page == "Document Upload":
     )
     
     if uploaded_files:
+        print("📂 Processing uploaded files...")
         for uploaded_file in uploaded_files:
             # Create a unique file ID
             file_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
@@ -201,3 +206,5 @@ elif page == "Document Upload":
                 st.write("No documents in knowledge base yet.")
         except Exception:
             st.write("No documents in knowledge base yet.")
+            
+print("🎨 Rendering chat interface...")
