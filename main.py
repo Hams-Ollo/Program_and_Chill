@@ -68,14 +68,15 @@ Author: @hams_ollo
 Version: 0.0.1
 """
 
-from typing import Dict, List, Optional, Any, Tuple
 import streamlit as st
 import os
+import tempfile
+from datetime import datetime
+from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 import logging
-import json
-from datetime import datetime
-from langchain_groq import ChatGroq
+from app.agents.chat_agent import ChatAgent
+from app.agents.document_processor import DocumentProcessor
 
 # Load environment variables
 load_dotenv()
@@ -87,272 +88,102 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize LLM with better settings
-llm = ChatGroq(
-    groq_api_key=os.getenv("GROQ_API_KEY"),
-    model_name="mixtral-8x7b-32768",
-    temperature=0.7,
-    max_tokens=2000
-)
-
-# System prompt for better conversation
-SYSTEM_PROMPT = """You are a helpful and friendly AI assistant named Program & Chill. Your responses should be:
-1. Informative yet conversational
-2. Detailed when technical accuracy is needed
-3. Concise for simple queries
-4. Always helpful and supportive
-5. Engaging but professional
-
-Remember to maintain context throughout the conversation and ask for clarification when needed."""
-
-class AgentState:
-    """State management for the AI assistant."""
-    def __init__(self):
-        self.messages: List[Dict[str, str]] = []
-        self.context: Dict[str, Any] = {}
-        self.conversation_id: str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.error: Optional[str] = None
-    
-    def add_message(self, role: str, content: str) -> None:
-        """Add a message to the conversation history."""
-        self.messages.append({
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat()
-        })
-    
-    def get_chat_history(self) -> List[Dict[str, str]]:
-        """Get the conversation history."""
-        return self.messages
-    
-    def get_last_message(self) -> Optional[Dict[str, str]]:
-        """Get the last message in the conversation."""
-        return self.messages[-1] if self.messages else None
-    
-    def set_error(self, error: str) -> None:
-        """Set an error state."""
-        self.error = error
-        logger.error(f"Error in conversation {self.conversation_id}: {error}")
-    
-    def clear_error(self) -> None:
-        """Clear the error state."""
-        self.error = None
-
-def chat_node(state: AgentState) -> Tuple[AgentState, str]:
-    """Process the user's message and generate a response."""
-    try:
-        # Build message history for Groq
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend([{
-            "role": msg["role"],
-            "content": msg["content"]
-        } for msg in state.messages])
-        
-        # Generate response
-        response = llm.invoke(messages)
-        
-        # Add response to state
-        state.add_message("assistant", response.content)
-        
-        # Log successful interaction
-        logger.info(f"Successfully processed message in conversation {state.conversation_id}")
-        
-        return state, "END"
-        
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Error in chat_node: {error_msg}")
-        state.set_error(error_msg)
-        state.add_message(
-            "assistant",
-            "I apologize, but I encountered an error. Could you please try again or rephrase your question?"
-        )
-        return state, "END"
+# Initialize session state
+if "chat_agent" not in st.session_state:
+    st.session_state.chat_agent = ChatAgent(api_key=os.getenv("OPENAI_API_KEY"))
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "doc_processor" not in st.session_state:
+    st.session_state.doc_processor = DocumentProcessor()
 
 # Streamlit UI
 st.set_page_config(
     page_title="Program & Chill AI Assistant",
     page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        'About': "Program & Chill AI Assistant v0.0.1"
-    }
+    layout="wide"
 )
 
-# Add custom CSS for dark theme
-st.markdown("""
-<style>
-    /* Dark theme colors */
-    :root {
-        --background-color: #0E1117;
-        --text-color: #E0E0E0;
-        --secondary-background: #262730;
-        --border-color: #303236;
-        --accent-color: #4CAF50;
-    }
+# Sidebar for navigation
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to", ["Chat", "Document Upload"])
 
-    /* Main container */
-    .main {
-        background-color: var(--background-color);
-        color: var(--text-color);
-    }
-
-    /* Chat container */
-    .stChat {
-        padding: 20px;
-        background-color: var(--background-color);
-    }
-
-    /* Message bubbles */
-    .stChatMessage {
-        background-color: var(--secondary-background) !important;
-        border: 1px solid var(--border-color) !important;
-        border-radius: 10px;
-        padding: 15px !important;
-        margin: 8px 0;
-    }
-
-    /* User message specific */
-    .stChatMessage[data-testid="user-message"] {
-        background-color: #1E3A8A !important;
-    }
-
-    /* Assistant message specific */
-    .stChatMessage[data-testid="assistant-message"] {
-        background-color: #1F2937 !important;
-    }
-
-    /* Input box */
-    .stChatInputContainer {
-        background-color: var(--secondary-background) !important;
-        border-color: var(--border-color) !important;
-        padding: 10px;
-        border-radius: 10px;
-    }
-
-    /* Sidebar */
-    .css-1d391kg {
-        background-color: var(--secondary-background);
-    }
-
-    /* Buttons */
-    .stButton>button {
-        background-color: var(--accent-color);
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 5px;
-        transition: all 0.3s;
-    }
-
-    .stButton>button:hover {
-        background-color: #45a049;
-        transform: translateY(-1px);
-    }
-
-    /* Sliders */
-    .stSlider {
-        padding: 10px 0;
-    }
-
-    /* Text elements */
-    .stMarkdown {
-        color: var(--text-color);
-        font-size: 16px;
-    }
-
-    /* Headers */
-    h1, h2, h3 {
-        color: var(--text-color) !important;
-    }
-
-    /* Divider */
-    hr {
-        border-color: var(--border-color);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Main title with emoji
-st.title("💬 Program & Chill AI Assistant")
-
-# Sidebar
-with st.sidebar:
-    st.title("⚙️ Settings")
+if page == "Chat":
+    st.title("💬 Program & Chill AI Assistant")
     
-    # App description
-    st.markdown("""
-    ### About
-    Program & Chill is an advanced AI assistant powered by Groq's API. 
-    It offers intelligent conversation with fast, accurate responses.
+    # Display chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+            if "sources" in message:
+                with st.expander("View Sources"):
+                    for source in message["sources"]:
+                        st.write(f"- {source}")
     
-    ---
-    """)
-    
-    # Core Settings
-    st.subheader("🎯 Core Settings")
-    
-    # Model settings
-    st.markdown("##### Model Parameters")
-    temperature = st.slider(
-        "Temperature",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.7,
-        help="Higher values make responses more creative, lower values make them more focused"
-    )
-    
-    max_tokens = st.slider(
-        "Max Tokens",
-        min_value=100,
-        max_value=4000,
-        value=2000,
-        help="Maximum length of the response"
-    )
-    
-    # Chat settings
-    st.markdown("##### Chat Settings")
-    if st.button("🗑️ Clear Chat History"):
-        st.session_state.messages = []
-        st.rerun()
-
-# Initialize session state
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-    # Add welcome message
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": "Hello! I'm Program & Chill, your AI assistant. How can I help you today?"
-    })
-
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# Chat input
-if prompt := st.chat_input("What can I help you with?"):
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    # Process message
-    with st.spinner("Thinking..."):
-        try:
-            state = AgentState()
-            state.messages = [{"role": "user", "content": prompt}]
-            result, _ = chat_node(state)
-            
-            # Get the last message (assistant's response)
-            last_message = result.get_last_message()
-            if last_message and last_message["role"] == "assistant":
-                st.session_state.messages.append(last_message)
-                with st.chat_message("assistant"):
-                    st.markdown(last_message["content"])
+    # Chat input
+    if prompt := st.chat_input("What would you like to know?"):
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.write(prompt)
         
-        except Exception as e:
-            logger.error(f"Error in main chat loop: {str(e)}")
-            with st.chat_message("assistant"):
-                st.error("I apologize, but something went wrong. Please try again.")
+        # Get AI response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = st.session_state.chat_agent.process_message(prompt)
+                st.write(response["response"])
+                
+                # Display sources if available
+                if response["source_documents"]:
+                    with st.expander("View Sources"):
+                        for doc in response["source_documents"]:
+                            st.write(f"- {doc.metadata.get('source', 'Unknown source')}")
+                
+                # Add assistant response to chat history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response["response"],
+                    "sources": [doc.metadata.get('source', 'Unknown source') for doc in response["source_documents"]]
+                })
+
+elif page == "Document Upload":
+    st.title("📄 Document Upload")
+    st.write("Upload documents to enhance your AI assistant's knowledge.")
+    
+    uploaded_files = st.file_uploader(
+        "Choose files to upload",
+        accept_multiple_files=True,
+        type=["pdf", "txt", "doc", "docx"]
+    )
+    
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            # Create a unique file ID
+            file_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
+            
+            # Save the file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{uploaded_file.name}") as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_path = tmp_file.name
+            
+            try:
+                # Process the document
+                with st.spinner(f"Processing {uploaded_file.name}..."):
+                    documents = st.session_state.doc_processor.load_document(tmp_path)
+                    st.session_state.chat_agent.add_documents(documents)
+                st.success(f"Successfully processed {uploaded_file.name}")
+            except Exception as e:
+                st.error(f"Error processing {uploaded_file.name}: {str(e)}")
+            finally:
+                # Clean up temporary file
+                os.unlink(tmp_path)
+    
+    # Show document statistics
+    with st.expander("Document Statistics"):
+        try:
+            stats = st.session_state.doc_processor.query_documents("", k=1)
+            if stats:
+                st.write(f"Number of documents in knowledge base: {len(stats)}")
+            else:
+                st.write("No documents in knowledge base yet.")
+        except Exception:
+            st.write("No documents in knowledge base yet.")
