@@ -59,30 +59,22 @@
 #
 #-------------------------------------------------------------------------------------#
 
-
 """
 Program & Chill AI Assistant
 ---------------------------
-A multi-agent AI system for content creation and brand management using LangGraph,
-Streamlit, and Groq API.
+A conversational AI assistant using Groq API.
 
 Author: @hams_ollo
 Version: 0.0.1
 """
 
 import streamlit as st
-from langchain_groq import ChatGroq
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.schema import SystemMessage, HumanMessage
-from langgraph.graph import END, StateGraph
-from typing import Dict, List, Tuple, Any, Optional
 import os
 from dotenv import load_dotenv
-from database_manager import DatabaseManager
 import logging
 import json
 from datetime import datetime
-import uuid
+from langchain_groq import ChatGroq
 
 # Load environment variables
 load_dotenv()
@@ -94,242 +86,273 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize database
-db = DatabaseManager(persist_directory="./chroma_db")
-
-# Initialize LLM
+# Initialize LLM with better settings
 llm = ChatGroq(
-    temperature=0.7,
     groq_api_key=os.getenv("GROQ_API_KEY"),
-    model_name="mixtral-8x7b-32768"
+    model_name="mixtral-8x7b-32768",
+    temperature=0.7,
+    max_tokens=2000,
+    top_p=0.9
 )
 
+# System prompt for better conversation
+SYSTEM_PROMPT = """You are a helpful and friendly AI assistant named Program & Chill. Your responses should be:
+1. Informative yet conversational
+2. Detailed when technical accuracy is needed
+3. Concise for simple queries
+4. Always helpful and supportive
+5. Engaging but professional
+
+Remember to maintain context throughout the conversation and ask for clarification when needed."""
+
 class AgentState:
+    """State management for the AI assistant."""
     def __init__(self):
-        self.messages: List[Dict] = []
-        self.current_plan: Optional[Dict] = None
-        self.current_post: Optional[Dict] = None
+        self.messages: List[Dict[str, str]] = []
+        self.context: Dict[str, Any] = {}
+        self.conversation_id: str = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.error: Optional[str] = None
+    
+    def add_message(self, role: str, content: str) -> None:
+        """Add a message to the conversation history."""
+        self.messages.append({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def get_chat_history(self) -> List[Dict[str, str]]:
+        """Get the conversation history."""
+        return self.messages
+    
+    def get_last_message(self) -> Optional[Dict[str, str]]:
+        """Get the last message in the conversation."""
+        return self.messages[-1] if self.messages else None
+    
+    def set_error(self, error: str) -> None:
+        """Set an error state."""
+        self.error = error
+        logger.error(f"Error in conversation {self.conversation_id}: {error}")
+    
+    def clear_error(self) -> None:
+        """Clear the error state."""
+        self.error = None
 
-def understand_request(state: AgentState) -> Tuple[AgentState, str]:
-    """Process the user's request and determine the next action."""
+def chat_node(state: AgentState) -> Tuple[AgentState, str]:
+    """Process the user's message and generate a response."""
     try:
-        messages = [
-            SystemMessage(content="You are a helpful AI assistant for content creation and social media management."),
-            *[HumanMessage(content=msg["content"]) for msg in state.messages]
-        ]
-        response = llm.invoke(messages)
-        
-        # Update state with the response
-        state.messages.append({"role": "assistant", "content": response.content})
-        
-        # Determine next action
-        if "create plan" in response.content.lower():
-            return state, "plan_execution"
-        elif "create post" in response.content.lower():
-            return state, "execute_task"
-        else:
-            return state, "generate_response"
-    except Exception as e:
-        state.error = str(e)
-        logger.error(f"Error in understand_request: {e}")
-        return state, END
-
-def plan_execution(state: AgentState) -> Tuple[AgentState, str]:
-    """Create and store a content plan."""
-    try:
-        # Generate content plan
-        plan_prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="Create a detailed content plan based on the user's request."),
-            MessagesPlaceholder(variable_name="history"),
-            HumanMessage(content="Generate a content plan with specific goals and timeline.")
-        ])
-        
-        chain = plan_prompt | llm
-        
-        # Create plan
-        plan_response = chain.invoke({"history": state.messages})
-        plan_data = {
-            "id": str(uuid.uuid4()),
-            "content": plan_response.content,
-            "created_at": datetime.now().isoformat(),
-            "status": "active"
-        }
-        
-        # Store in database
-        db.add_content_plan(plan_data["id"], plan_data)
-        
-        # Update state
-        state.current_plan = plan_data
-        state.messages.append({"role": "assistant", "content": f"Content plan created: {plan_data['id']}"})
-        
-        return state, "generate_response"
-    except Exception as e:
-        state.error = str(e)
-        logger.error(f"Error in plan_execution: {e}")
-        return state, END
-
-def execute_task(state: AgentState) -> Tuple[AgentState, str]:
-    """Execute specific tasks like creating social media posts."""
-    try:
-        # Generate social media post
-        post_prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="Create an engaging social media post based on the content plan and user request."),
-            MessagesPlaceholder(variable_name="history"),
-            HumanMessage(content="Generate a social media post.")
-        ])
-        
-        chain = post_prompt | llm
-        
-        # Create post
-        post_response = chain.invoke({"history": state.messages})
-        post_data = {
-            "id": str(uuid.uuid4()),
-            "content": post_response.content,
-            "created_at": datetime.now().isoformat(),
-            "plan_id": state.current_plan["id"] if state.current_plan else None,
-            "status": "draft"
-        }
-        
-        # Store in database
-        db.add_social_post(post_data["id"], post_data)
-        
-        # Update state
-        state.current_post = post_data
-        state.messages.append({"role": "assistant", "content": f"Social post created: {post_data['id']}"})
-        
-        return state, "generate_response"
-    except Exception as e:
-        state.error = str(e)
-        logger.error(f"Error in execute_task: {e}")
-        return state, END
-
-def generate_response(state: AgentState) -> Tuple[AgentState, str]:
-    """Generate a final response to the user."""
-    try:
-        response_prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="Generate a helpful response summarizing the actions taken."),
-            MessagesPlaceholder(variable_name="history"),
-            HumanMessage(content="Summarize what has been done and provide next steps.")
-        ])
-        
-        chain = response_prompt | llm
+        # Build message history for Groq
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend([{
+            "role": msg["role"],
+            "content": msg["content"]
+        } for msg in state.messages])
         
         # Generate response
-        final_response = chain.invoke({"history": state.messages})
-        state.messages.append({"role": "assistant", "content": final_response.content})
+        response = llm.invoke(messages)
         
-        return state, END
+        # Add response to state
+        state.add_message("assistant", response.content)
+        
+        # Log successful interaction
+        logger.info(f"Successfully processed message in conversation {state.conversation_id}")
+        
+        return state, "END"
+        
     except Exception as e:
-        state.error = str(e)
-        logger.error(f"Error in generate_response: {e}")
-        return state, END
-
-# Create workflow
-workflow = StateGraph(AgentState)
-
-# Add nodes
-workflow.add_node("understand_request", understand_request)
-workflow.add_node("plan_execution", plan_execution)
-workflow.add_node("execute_task", execute_task)
-workflow.add_node("generate_response", generate_response)
-
-# Add edges
-workflow.add_edge("understand_request", "plan_execution")
-workflow.add_edge("understand_request", "execute_task")
-workflow.add_edge("understand_request", "generate_response")
-workflow.add_edge("plan_execution", "generate_response")
-workflow.add_edge("execute_task", "generate_response")
-
-# Set entry point
-workflow.set_entry_point("understand_request")
-
-# Compile workflow
-app = workflow.compile()
+        error_msg = str(e)
+        logger.error(f"Error in chat_node: {error_msg}")
+        state.set_error(error_msg)
+        state.add_message(
+            "assistant",
+            "I apologize, but I encountered an error. Could you please try again or rephrase your question?"
+        )
+        return state, "END"
 
 # Streamlit UI
-st.set_page_config(page_title="Program & Chill", page_icon="🎯", layout="wide")
+st.set_page_config(
+    page_title="Program & Chill AI Assistant",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'About': "Program & Chill AI Assistant v0.0.1"
+    }
+)
 
-# Apply dark theme
+# Add custom CSS for dark theme
 st.markdown("""
-    <style>
-        .stApp {
-            background-color: #1E1E1E;
-            color: #FFFFFF;
-        }
-        .stTextInput > div > div > input {
-            background-color: #2D2D2D;
-            color: #FFFFFF;
-        }
-        .stButton > button {
-            background-color: #0078D4;
-            color: #FFFFFF;
-        }
-    </style>
+<style>
+    /* Dark theme colors */
+    :root {
+        --background-color: #0E1117;
+        --text-color: #E0E0E0;
+        --secondary-background: #262730;
+        --border-color: #303236;
+        --accent-color: #4CAF50;
+    }
+
+    /* Main container */
+    .main {
+        background-color: var(--background-color);
+        color: var(--text-color);
+    }
+
+    /* Chat container */
+    .stChat {
+        padding: 20px;
+        background-color: var(--background-color);
+    }
+
+    /* Message bubbles */
+    .stChatMessage {
+        background-color: var(--secondary-background) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 10px;
+        padding: 15px !important;
+        margin: 8px 0;
+    }
+
+    /* User message specific */
+    .stChatMessage[data-testid="user-message"] {
+        background-color: #1E3A8A !important;
+    }
+
+    /* Assistant message specific */
+    .stChatMessage[data-testid="assistant-message"] {
+        background-color: #1F2937 !important;
+    }
+
+    /* Input box */
+    .stChatInputContainer {
+        background-color: var(--secondary-background) !important;
+        border-color: var(--border-color) !important;
+        padding: 10px;
+        border-radius: 10px;
+    }
+
+    /* Sidebar */
+    .css-1d391kg {
+        background-color: var(--secondary-background);
+    }
+
+    /* Buttons */
+    .stButton>button {
+        background-color: var(--accent-color);
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 5px;
+        transition: all 0.3s;
+    }
+
+    .stButton>button:hover {
+        background-color: #45a049;
+        transform: translateY(-1px);
+    }
+
+    /* Sliders */
+    .stSlider {
+        padding: 10px 0;
+    }
+
+    /* Text elements */
+    .stMarkdown {
+        color: var(--text-color);
+        font-size: 16px;
+    }
+
+    /* Headers */
+    h1, h2, h3 {
+        color: var(--text-color) !important;
+    }
+
+    /* Divider */
+    hr {
+        border-color: var(--border-color);
+    }
+</style>
 """, unsafe_allow_html=True)
+
+# Main title with emoji
+st.title("💬 Program & Chill AI Assistant")
 
 # Sidebar
 with st.sidebar:
-    st.title("Program & Chill")
-    st.markdown("---")
+    st.title("⚙️ Settings")
     
-    # View selection
-    view = st.radio("Select View", ["Chat", "Content Calendar", "Analytics"])
+    # App description
+    st.markdown("""
+    ### About
+    Program & Chill is an advanced AI assistant powered by Groq's API. 
+    It offers intelligent conversation with fast, accurate responses.
     
-    # Settings and tools
-    st.markdown("### Settings")
-    temperature = st.slider("AI Temperature", 0.0, 1.0, 0.7)
+    ---
+    """)
     
-    # Update LLM temperature
-    llm.temperature = temperature
-
-# Main content area
-if view == "Chat":
-    st.header("AI Assistant")
+    # Core Settings
+    st.subheader("🎯 Core Settings")
     
-    # Initialize chat history
-    if "messages" not in st.session_state:
+    # Model settings
+    st.markdown("##### Model Parameters")
+    temperature = st.slider(
+        "Temperature",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.7,
+        help="Higher values make responses more creative, lower values make them more focused"
+    )
+    
+    max_tokens = st.slider(
+        "Max Tokens",
+        min_value=100,
+        max_value=4000,
+        value=2000,
+        help="Maximum length of the response"
+    )
+    
+    # Chat settings
+    st.markdown("##### Chat Settings")
+    if st.button("🗑️ Clear Chat History"):
         st.session_state.messages = []
-    
-    # Display chat history
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # Chat input
-    if prompt := st.chat_input("Type your message here..."):
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Process with workflow
-        state = AgentState()
-        state.messages = st.session_state.messages.copy()
-        result = app.invoke(state)
-        
-        # Update chat history with assistant's response
-        if result.messages:
-            for message in result.messages[len(st.session_state.messages):]:
-                st.session_state.messages.append(message)
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
+        st.rerun()
 
-elif view == "Content Calendar":
-    st.header("Content Calendar")
-    
-    # Query recent content plans
-    recent_plans = db.query_content_plans("", n_results=10)
-    
-    # Display content plans
-    for plan in recent_plans:
-        with st.expander(f"Plan: {plan['created_at']}"):
-            st.write(plan['content'])
-            st.button("Edit", key=f"edit_{plan['id']}")
-            st.button("Delete", key=f"delete_{plan['id']}")
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+    # Add welcome message
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": "Hello! I'm Program & Chill, your AI assistant. How can I help you today?"
+    })
 
-elif view == "Analytics":
-    st.header("Analytics Dashboard")
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if prompt := st.chat_input("What can I help you with?"):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
     
-    # Placeholder for analytics
-    st.markdown("Analytics dashboard coming soon!")
+    # Process message
+    with st.spinner("Thinking..."):
+        try:
+            state = AgentState()
+            state.messages = [{"role": "user", "content": prompt}]
+            result, _ = chat_node(state)
+            
+            # Get the last message (assistant's response)
+            last_message = result.get_last_message()
+            if last_message and last_message["role"] == "assistant":
+                st.session_state.messages.append(last_message)
+                with st.chat_message("assistant"):
+                    st.markdown(last_message["content"])
+        
+        except Exception as e:
+            logger.error(f"Error in main chat loop: {str(e)}")
+            with st.chat_message("assistant"):
+                st.error("I apologize, but something went wrong. Please try again.")
