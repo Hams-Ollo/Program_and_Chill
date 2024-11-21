@@ -11,7 +11,7 @@ from .document_processor import DocumentProcessor
 class GroqChatModel(BaseChatModel):
     """Custom chat model class for Groq."""
     
-    def __init__(self, api_key: str, model: str = "mixtral-8x7b-32768", temperature: float = 0.7):
+    def __init__(self, api_key: str, model: str = "llama3-groq-70b-8192-tool-use-preview", temperature: float = 0.7):
         """Initialize the Groq chat model."""
         super().__init__()
         self._client = groq.Groq(api_key=api_key)
@@ -41,7 +41,7 @@ class GroqChatModel(BaseChatModel):
                 messages=[{"role": "user", "content": prompt}],
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=4096
+                max_tokens=8192
             )
             message = AIMessage(content=completion.choices[0].message.content)
             return {"generations": [{"message": message}]}
@@ -59,7 +59,7 @@ class GroqChatModel(BaseChatModel):
         return "groq"
 
 class ChatAgent:
-    def __init__(self, api_key: str, model: str = "mixtral-8x7b-32768"):
+    def __init__(self, api_key: str, model: str = "llama3-groq-70b-8192-tool-use-preview"):
         """Initialize the chat agent."""
         try:
             self.llm = GroqChatModel(
@@ -160,7 +160,7 @@ class ChatAgent:
                 memory=self.memory,
                 combine_docs_chain_kwargs={"prompt": self.qa_prompt}
             )
-            logging.info("Successfully added documents and updated conversation chain")
+            logging.info("Successfully added documents to knowledge base")
         except Exception as e:
-            logging.error(f"Error adding documents: {str(e)}", exc_info=True)
+            logging.error(f"Error adding documents: {str(e)}")
             raise

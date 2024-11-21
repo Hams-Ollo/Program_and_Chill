@@ -75,7 +75,6 @@ class DocumentProcessor:
                 embedding=self.embeddings,
                 persist_directory=self.persist_directory
             )
-            vectordb.persist()
             
             logging.info("Successfully processed and stored documents")
             return vectordb
@@ -97,16 +96,9 @@ class DocumentProcessor:
             )
             
             results = vectordb.similarity_search_with_relevance_scores(query, k=k)
-            
-            return [
-                {
-                    "content": doc.page_content,
-                    "metadata": doc.metadata,
-                    "relevance": score
-                }
-                for doc, score in results
-            ]
+            return results
             
         except Exception as e:
             logging.error(f"Error querying documents: {str(e)}", exc_info=True)
             return []
+

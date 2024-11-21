@@ -75,7 +75,10 @@ from dotenv import load_dotenv
 from app.agents.chat_agent import ChatAgent
 from app.agents.document_processor import DocumentProcessor
 from datetime import datetime
+import pandas as pd
+import markdown
 from typing import Dict, List, Any, Optional
+from langchain.schema import Document
 
 # Must be the first Streamlit command
 st.set_page_config(
@@ -168,9 +171,9 @@ elif page == "Document Upload":
     st.write("Upload documents to enhance your AI assistant's knowledge.")
     
     uploaded_files = st.file_uploader(
-        "Choose files to upload",
+        "Upload your documents",
         accept_multiple_files=True,
-        type=["pdf", "txt", "doc", "docx"]
+        type=["pdf", "txt", "doc", "docx", "md", "csv", "xlsx", "xls"]
     )
     
     if uploaded_files:
@@ -178,23 +181,56 @@ elif page == "Document Upload":
         for uploaded_file in uploaded_files:
             # Create a unique file ID
             file_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uploaded_file.name}"
-            
-            # Save the file temporarily
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{uploaded_file.name}") as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_path = tmp_file.name
+            file_extension = uploaded_file.name.split('.')[-1].lower()
             
             try:
-                # Process the document
-                with st.spinner(f"Processing {uploaded_file.name}..."):
-                    documents = st.session_state.doc_processor.load_document(tmp_path)
-                    st.session_state.chat_agent.add_documents(documents)
+                print(f"📄 Processing {uploaded_file.name}...")
+                
+                # Handle different file types
+                if file_extension in ['csv', 'xlsx', 'xls']:
+                    if file_extension == 'csv':
+                        df = pd.read_csv(uploaded_file)
+                    else:
+                        df = pd.read_excel(uploaded_file)
+                    # Convert DataFrame to string representation
+                    content = df.to_string()
+                    # Create a Document object
+                    documents = [Document(
+                        page_content=content,
+                        metadata={"source": uploaded_file.name}
+                    )]
+                    print(f"📊 Successfully processed {file_extension.upper()} file: {uploaded_file.name}")
+                
+                elif file_extension == 'md':
+                    content = uploaded_file.read().decode('utf-8')
+                    # Convert Markdown to plain text while preserving structure
+                    content = markdown.markdown(content)
+                    # Create a Document object
+                    documents = [Document(
+                        page_content=content,
+                        metadata={"source": uploaded_file.name}
+                    )]
+                    print(f"📝 Successfully processed Markdown file: {uploaded_file.name}")
+                
+                else:
+                    # Save the file temporarily
+                    with open(file_id, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    
+                    # Process the document using existing logic
+                    documents = st.session_state.doc_processor.load_document(file_id)
+                    # Clean up the temporary file
+                    os.remove(file_id)
+                
+                # Add the processed documents to the chat agent's knowledge base
+                st.session_state.chat_agent.add_documents(documents)
+                print(f"✅ Successfully added {uploaded_file.name} to knowledge base")
                 st.success(f"Successfully processed {uploaded_file.name}")
+                
             except Exception as e:
                 st.error(f"Error processing {uploaded_file.name}: {str(e)}")
-            finally:
-                # Clean up temporary file
-                os.unlink(tmp_path)
+                print(f"❌ Error processing {uploaded_file.name}: {str(e)}")
+                continue
     
     # Show document statistics
     with st.expander("Document Statistics"):

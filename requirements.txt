@@ -14,3 +14,6 @@ pdfminer.six>=20221105
 groq>=0.4.2
 tiktoken>=0.5.1
 docx2txt>=0.8
+pandas>=2.2.0
+openpyxl>=3.1.2
+markdown>=3.5.2
